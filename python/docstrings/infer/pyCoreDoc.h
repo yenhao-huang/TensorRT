@@ -434,8 +434,10 @@ constexpr char const* set_device_memory = R"trtdoc(
     :arg memory: 256-byte aligned device memory.
     :arg size: Size of the provided memory. This must be at least as large as CudaEngine.get_device_memory_size_v2
 
-    If using :func:`enqueue_v3()`, it is in use until :func:`enqueue_v3()` returns. Releasing or otherwise using the memory for other
-    purposes during this time will result in undefined behavior. This includes using the same memory for a parallel execution context.
+    If using :func:`execute_async_v3()` to run the network, the memory is in use from the invocation of
+    :func:`execute_async_v3()` until network execution is complete. If using :func:`execute_v2()`, it is in use until
+    :func:`execute_v2()` returns. Releasing or otherwise using the memory for other purposes, including using it in another
+    execution context running in parallel, during this time will result in undefined behavior.
 )trtdoc";
 
 constexpr char const* set_optimization_profile_async = R"trtdoc(
