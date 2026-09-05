@@ -45,6 +45,7 @@
 #include "regionPlugin/regionPlugin.h"
 #include "reorgPlugin/reorgPlugin.h"
 #include "resizeNearestPlugin/resizeNearestPlugin.h"
+#include "resizeWithPadPlugin/resizeWithPadPlugin.h"
 #include "roiAlignPlugin/roiAlignPlugin.h"
 #include "roiAlignPlugin/roiAlignPluginLegacy.h"
 #include "scatterElementsPlugin/scatterElementsPlugin.h"
@@ -201,6 +202,7 @@ extern "C"
         initializePlugin<nvinfer1::plugin::ReorgDynamicPluginCreator>(logger, libNamespace);
         initializePlugin<nvinfer1::plugin::ReorgStaticPluginCreator>(logger, libNamespace);
         initializePlugin<nvinfer1::plugin::ResizeNearestPluginCreator>(logger, libNamespace);
+        initializePlugin<nvinfer1::plugin::ResizeWithPadPluginCreator>(logger, libNamespace);
         initializePlugin<nvinfer1::plugin::ROIAlignPluginCreator>(logger, libNamespace);
         initializePlugin<nvinfer1::plugin::RPROIPluginCreator>(logger, libNamespace);
         initializePlugin<nvinfer1::plugin::ScatterElementsPluginV2Creator>(logger, libNamespace);
