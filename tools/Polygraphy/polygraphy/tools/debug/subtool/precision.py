@@ -79,7 +79,7 @@ class BisectMarker(BaseMarker):
         # If good and bad are within 1 layer of each other,
         # then we already have the information we need.
         if abs(self.good - self.bad) <= 1:
-            if self.good >= self.max_layers:
+            if self.good > self.max_layers:
                 G_LOGGER.error(
                     "Could not find a configuration that satisfied accuracy requirements."
                 )
@@ -168,6 +168,7 @@ class Precision(BaseCheckerSubtool):
         )
 
     def setup(self, args, network):
+        self.network = network
         self.precision = {"float32": trt.float32, "float16": trt.float16}[
             args.precision
         ]
@@ -258,13 +259,34 @@ class Precision(BaseCheckerSubtool):
         G_LOGGER.verbose(
             f"Marking layer(s): {marked_indices} to run in {self.precision} precision"
         )
+        return sorted(marked_indices)
 
     def process_network(self, network):
         indices = list(self.layer_marker.select_layers())
         self.mark_layers(network, indices)
 
     def step(self, success):
-        return self.layer_marker.step(success)
+        finished = self.layer_marker.step(success)
+        if finished and self.layer_marker.good <= self.layer_marker.max_layers:
+            # The last iteration may have failed. Report the successful boundary,
+            # not the last candidate. Derive it from the marker so this also works
+            # when a debug replay skips process_network().
+            count = self.layer_marker.good
+            start = (
+                0
+                if self.layer_marker.direction == "forward"
+                else self.layer_marker.max_layers - count
+            )
+            marked = self.mark_layers(self.network, range(start, start + count))
+            G_LOGGER.info(
+                f"Higher-precision layers in the successful configuration ({len(marked)} marked, {self.precision}):\n"
+                "Indices refer to the parsed TensorRT network, not ONNX node indices."
+            )
+            for index in marked:
+                G_LOGGER.info(
+                    trt_util.str_from_layer(self.network.get_layer(index), index)
+                )
+        return finished
 
     def remaining(self):
         return self.layer_marker.remaining()

@@ -31,6 +31,8 @@ Among other things, Polygraphy lets you:
     - Simplify and sanitize (example: [CLI](examples/cli/surgeon/02_folding_constants/))
 - Isolate faulty tactics in TensorRT
     (example: [CLI](examples/cli/debug/01_debugging_flaky_trt_tactics/))
+- Identify layers selected by a mixed-precision search
+    (example: [CLI](examples/cli/debug/03_identifying_precision_layers/))
 
 
 ## Installation
