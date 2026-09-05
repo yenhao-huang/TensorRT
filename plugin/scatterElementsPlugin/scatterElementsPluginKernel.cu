@@ -53,6 +53,10 @@ __global__ void scatterElements_kernel(const TScalar* updatesData, const TensorI
     {
         int32_t offset = detail::IndexToOffset<int64_t, int32_t, -1>::get(thread_idx, indexInfo);
         int64_t idx = indexInfo.data[offset];
+        if (idx < 0)
+        {
+            idx += nN;
+        }
 
         Reducer<TScalar, tReduce>::atomic_write(outData + b * nN * nK + idx * nK + k, updatesData[thread_idx]);
     }
@@ -125,6 +129,11 @@ void runScatterElementsKernel(void* outDataPtr, void const* dataDataPtr, void co
     cudaStream_t stream)
 
 {
+    if (axis < 0)
+    {
+        axis += dataDesc.dims.nbDims;
+    }
+    PLUGIN_VALIDATE(axis >= 0 && axis < dataDesc.dims.nbDims);
     auto updatesNumEl = volume(updatesDesc.dims);
     auto outNumEl = volume(outDesc.dims);
 
