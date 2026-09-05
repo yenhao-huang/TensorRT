@@ -15,6 +15,8 @@
 # limitations under the License.
 #
 
+import contextlib
+import itertools
 import math
 
 from polygraphy import constants, mod, util
@@ -170,6 +172,10 @@ class Reduce(Tool):
         you should freeze the input shapes and then fold the shape operations prior to running `debug reduce`:
             `polygraphy surgeon sanitize --fold-constants --override-input-shapes <static_input_shapes>`
 
+    Input reduction supports only one input sample because removed inputs are
+    replaced with constants from that sample. With multiple samples, use
+    `--no-reduce-inputs` or provide a single sample to both reduction and its check.
+
     The typical usage of `debug reduce` is:
 
         polygraphy debug reduce <onnx_model> --output <reduced_model> \
@@ -257,6 +263,24 @@ class Reduce(Tool):
             )
             model = self.arg_groups[OnnxInferShapesArgs].infer_shapes(model)
 
+        # Input reduction freezes tensors from one sample. Validate before
+        # invoking the checker, and retain the sample for one-shot loaders.
+        fallback_data_loader = None
+        if args.reduce_inputs:
+            data_loader = self.arg_groups[DataLoaderArgs].get_data_loader()
+            with contextlib.suppress(AttributeError):
+                data_loader.input_metadata = onnx_util.get_input_metadata(model.graph)
+            fallback_data_loader = list(itertools.islice(iter(data_loader), 2))
+            if len(fallback_data_loader) > 1:
+                G_LOGGER.critical(
+                    "Input reduction only supports a single input iteration. "
+                    "Provide one sample, or use --no-reduce-inputs to reduce outputs with multiple samples."
+                )
+            if not fallback_data_loader:
+                G_LOGGER.critical(
+                    "Input reduction requires at least one input sample, but the data loader is empty."
+                )
+
         # Lower Constant nodes into Constant tensors
         # If we don't do this, the outputs of Constant nodes may be incorrectly marked
         #   as variable inputs. Further, fallback shape inference does not apply to Constant nodes.
@@ -283,7 +307,9 @@ class Reduce(Tool):
             with G_LOGGER.indent():
                 new_outputs, new_meta = self.arg_groups[
                     OnnxInferShapesArgs
-                ].fallback_inference(model, outputs=names)
+                ].fallback_inference(
+                    model, outputs=names, data_loader=fallback_data_loader
+                )
             fallback_outputs.update(new_outputs)
             fallback_metadata.update(new_meta)
 
