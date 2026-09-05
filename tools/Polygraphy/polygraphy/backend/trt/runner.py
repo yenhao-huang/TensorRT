@@ -32,6 +32,61 @@ torch = mod.lazy_import("torch>=1.13.0")
 trt = lazy_import_trt()
 
 
+def _unpack_vectorized_output(
+    raw_array, dtype, shape, strides, vectorized_dim, components
+):
+    """Return logical values, excluding vector padding, from a host output buffer."""
+    shape = tuple(shape)
+    if not util.volume(shape):
+        return util.array.view(raw_array[:0], dtype, shape)
+
+    # TensorRT strides count vectors rather than scalars. Split the vectorized
+    # dimension into a vector index and a final scalar-in-vector dimension.
+    physical_shape = list(shape)
+    if vectorized_dim >= 0:
+        physical_shape[vectorized_dim] = (
+            shape[vectorized_dim] + components - 1
+        ) // components
+    physical_shape.append(components)
+    scalar_strides = [stride * components for stride in strides] + [1]
+    required = 1 + sum(
+        (dim - 1) * stride for dim, stride in zip(physical_shape, scalar_strides)
+    )
+    if required * dtype.itemsize > util.array.nbytes(raw_array):
+        G_LOGGER.critical(
+            "TensorRT output buffer is smaller than its reported shape and strides"
+        )
+    array = util.array.view(
+        raw_array[: int(required * dtype.itemsize)], dtype, (required,)
+    )
+    if util.array.is_torch(array):
+        array = torch.as_strided(array, physical_shape, scalar_strides)
+    else:
+        array = np.lib.stride_tricks.as_strided(
+            array,
+            shape=physical_shape,
+            strides=tuple(stride * array.itemsize for stride in scalar_strides),
+            writeable=False,
+        )
+    if vectorized_dim >= 0:
+        permutation = list(range(len(shape)))
+        permutation.insert(vectorized_dim + 1, len(shape))
+        array = (
+            array.permute(permutation)
+            if util.array.is_torch(array)
+            else array.transpose(permutation)
+        )
+        padded_shape = list(shape)
+        padded_shape[vectorized_dim] = physical_shape[vectorized_dim] * components
+        array = array.reshape(padded_shape)
+        selection = [slice(None)] * len(shape)
+        selection[vectorized_dim] = slice(shape[vectorized_dim])
+        array = array[tuple(selection)]
+    else:
+        array = array.reshape(shape)
+    return util.array.make_contiguous(array)
+
+
 def _make_debug_listener():
     class DebugTensorWriter(trt.IDebugListener):
         def __init__(self):
@@ -360,9 +415,10 @@ class TrtRunner(BaseRunner):
             G_LOGGER.critical("`execute_async_v3()` failed. Please see the logging output above for details.")
 
         output_buffers = OrderedDict()
+        outputs_to_unpack = {}
         for name in get_io(trt.TensorIOMode.OUTPUT):
-            # If we're dealing with vectorized formats, we need to return a FormattedArray.
-            # Otherwise, we create a view instead with the correct shape/dtype.
+            # Keep vectorized buffers raw until the host copy has completed.
+            # Linear buffers can be viewed with the correct shape/dtype immediately.
             raw_array = self.output_allocator.buffers[name]
 
             shape = self.output_allocator.shapes[name]
@@ -395,6 +451,29 @@ class TrtRunner(BaseRunner):
                     use_torch=use_torch,
                 )
 
+            if (
+                using_vectorized_format
+                and copy_outputs_to_host
+                and not return_raw_buffers
+            ):
+                try:
+                    vectorized_dim = self.engine.get_tensor_vectorized_dim(
+                        name, self.context.active_optimization_profile
+                    )
+                    components = self.engine.get_tensor_components_per_element(
+                        name, self.context.active_optimization_profile
+                    )
+                except TypeError:
+                    # TensorRT-RTX does not take a profile index.
+                    vectorized_dim = self.engine.get_tensor_vectorized_dim(name)
+                    components = self.engine.get_tensor_components_per_element(name)
+                outputs_to_unpack[name] = (
+                    dtype,
+                    shape,
+                    tuple(self.context.get_tensor_strides(name)),
+                    vectorized_dim,
+                    components,
+                )
             if should_use_formatted_array:
                 array = FormattedArray(raw_array, shape=shape)
             else:
@@ -402,6 +481,10 @@ class TrtRunner(BaseRunner):
             output_buffers[name] = array
 
         self.stream.synchronize()
+        for name, metadata in outputs_to_unpack.items():
+            output_buffers[name] = _unpack_vectorized_output(
+                output_buffers[name].array, *metadata
+            )
 
         try:
             self.context.set_all_tensors_debug_state
@@ -432,7 +515,13 @@ class TrtRunner(BaseRunner):
                     Whether to copy inference outputs back to host memory.
                     If this is False, PyTorch GPU tensors or Polygraphy DeviceViews
                     are returned instead of PyTorch CPU tensors or NumPy arrays respectively.
-                    Defaults to True.
+                    Defaults to True. Vectorized host outputs are unpacked to their
+                    logical shape, excluding padding.
+
+            return_raw_buffers (bool):
+                    Return raw buffers wrapped in FormattedArray instead of unpacking
+                    their values. Vectorized device outputs also use FormattedArray.
+                    Defaults to False.
 
         Returns:
             OrderedDict[str, Union[numpy.ndarray, DeviceView, torch.Tensor]]:
