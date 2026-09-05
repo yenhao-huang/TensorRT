@@ -53,7 +53,7 @@ class ONNXClassifierWrapper:
     def allocate_memory(self, batch):
         self.output = np.empty(
             self.num_classes, dtype=self.target_dtype
-        )  # Need to set both input and output precisions to FP16 to fully enable FP16
+        )  # The output dtype must match the engine output type.
 
         # allocate device memory
         err, self.d_input = cudart.cudaMalloc(batch.nbytes)
@@ -121,22 +121,43 @@ class ONNXClassifierWrapper:
 
 
 def convert_onnx_to_engine(onnx_filename, engine_filename=None, max_workspace_size=1 << 30, fp16_mode=True):
+    """Build a strongly typed engine.
+
+    When fp16_mode is True, explicitly convert the ONNX graph to FP16 while
+    preserving its I/O types. This requires onnx and onnxconverter-common and
+    may affect accuracy. Use False to preserve an already typed FP32, FP16, or
+    mixed-precision graph. TensorRT no longer selects precision via an FP16 flag.
+    """
     logger = trt.Logger(trt.Logger.WARNING)
-    with trt.Builder(logger) as builder, builder.create_network() as network, trt.OnnxParser(
+    flags = 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
+    with trt.Builder(logger) as builder, builder.create_network(flags) as network, trt.OnnxParser(
         network, logger
     ) as parser, builder.create_builder_config() as builder_config:
         builder_config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, max_workspace_size)
-        if fp16_mode:
-            builder_config.set_flag(trt.BuilderFlag.FP16)
-
+        # Keep the FP32 reference comparison independent of TF32 rounding.
+        builder_config.clear_flag(trt.BuilderFlag.TF32)
         print("Parsing ONNX file.")
-        with open(onnx_filename, "rb") as model:
-            if not parser.parse(model.read()):
-                for error in range(parser.num_errors):
-                    print(parser.get_error(error))
+        if fp16_mode:
+            import onnx
+            from onnxconverter_common.float16 import convert_float_to_float16
+
+            model = convert_float_to_float16(
+                onnx.load(onnx_filename),
+                keep_io_types=True,
+                min_positive_val=2**-24,
+                max_finite_val=65504.0,
+            )
+            parsed = parser.parse(model.SerializeToString())
+        else:
+            parsed = parser.parse_from_file(str(onnx_filename))
+        if not parsed:
+            errors = "\n".join(str(parser.get_error(i)) for i in range(parser.num_errors))
+            raise RuntimeError(f"Failed to parse ONNX model:\n{errors}")
 
         print("Building TensorRT engine. This may take a few minutes.")
         serialized_engine = builder.build_serialized_network(network, builder_config)
+        if serialized_engine is None:
+            raise RuntimeError("Failed to build TensorRT engine")
 
         if engine_filename:
             with open(engine_filename, "wb") as f:

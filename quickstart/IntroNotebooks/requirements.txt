@@ -1,0 +1,4 @@
+# Extra dependencies for convert_onnx_to_engine(fp16_mode=True).
+# Install TensorRT and CUDA Python separately for your CUDA environment.
+onnx>=1.16
+onnxconverter-common>=1.16.0
