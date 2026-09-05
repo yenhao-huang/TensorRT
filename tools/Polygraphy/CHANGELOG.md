@@ -12,6 +12,7 @@ Dates are in YYYY-MM-DD format.
 - Changed `polygraphy multi-device shard` example and README to reflect new additions.
 
 ### Fixed
+- Fixed `debug reduce` treating omitted optional node inputs and outputs as graph I/O.
 - Fixed issue when `polygraphy multi-device shard` would exceed python recursive depth limit on large models.
 - Fixed a bug where setting `POLYGRAPHY_ASK_BEFORE_INSTALL=0` would enable asking before installing dependencies instead of disabling it.
 
