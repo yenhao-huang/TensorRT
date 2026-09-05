@@ -14,6 +14,25 @@ subgraph.
 The `debug reduce` subtool allows us to automate this process.
 
 
+## Input iterations
+
+Input reduction supports a single input sample. It replaces removed inputs with
+constants computed from that sample; those constants would be incorrect for
+other samples. `debug reduce` reports an error if its data loader provides more
+than one sample while input reduction is enabled. This applies to saved input
+files, custom data loader scripts (including generators), and `--iterations`.
+
+For this tutorial, generate the inputs and golden outputs from **one sample**,
+and use that same sample in both `debug reduce` and its `--check` command.
+For a custom loader, make it return or yield one sample; `--iterations 1` does
+not truncate a custom loader or saved input file.
+
+To keep multiple samples, add `--no-reduce-inputs` to `debug reduce`. The tool
+then preserves the original inputs and reduces outputs only. Continue providing
+all samples to the `--check` command. For example, add `--no-reduce-inputs` to
+the commands in steps 3 and 5 below when their input/golden files contain
+multiple iterations.
+
 ## Running The Example
 
 For the sake of this example, we'll assume our model (`./model.onnx`) has accuracy issues

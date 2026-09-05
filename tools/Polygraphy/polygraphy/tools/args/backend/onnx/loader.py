@@ -163,7 +163,7 @@ class OnnxInferShapesArgs(BaseArgs):
             loader = args_util.run_script(self.add_to_script, model)
             return util.invoke_if_callable(loader)[0]
 
-    def fallback_inference(self, onnx_model, outputs=None):
+    def fallback_inference(self, onnx_model, outputs=None, data_loader=None):
         """
         Run inference with ONNX-Runtime.
 
@@ -178,6 +178,9 @@ class OnnxInferShapesArgs(BaseArgs):
             outputs (List[str]):
                     The names of the outputs to retrieved.
                     Defaults to constants.MARK_ALL
+
+            data_loader (Optional[Iterable[Dict[str, numpy.ndarray]]]):
+                    Input samples to use instead of creating a loader from CLI arguments.
 
         Returns:
             (IterationResult, TensorMetadata):
@@ -195,7 +198,8 @@ class OnnxInferShapesArgs(BaseArgs):
             with onnxrt_backend.OnnxrtRunner(
                 onnxrt_backend.SessionFromOnnx(onnx_backend.BytesFromOnnx(load_model))
             ) as runner:
-                data_loader = self.arg_groups[DataLoaderArgs].get_data_loader()
+                if data_loader is None:
+                    data_loader = self.arg_groups[DataLoaderArgs].get_data_loader()
                 loader_cache = DataLoaderCache(data_loader)
                 loader_cache.set_input_metadata(
                     runner.get_input_metadata(use_numpy_dtypes=False)
