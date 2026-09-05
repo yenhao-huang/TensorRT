@@ -186,7 +186,7 @@ class DET2GraphSurgeon:
         actually match your preprocessing steps. Otherwise, behavior can be unpredictable.
         Additionally, anchors have to be generated for a fixed input dimensions,
         meaning as soon as image leaves a preprocessor and enters predictor.model.backbone() it must have
-        a fixed dimension (1344x1344 in my case) that every single image in dataset must follow, since currently
+        the same fixed dimensions as the exported ONNX input, since currently
         TensorRT plug-ins do not support dynamic shapes.
         """
         # Get Detectron 2 model config and build it.
@@ -203,7 +203,21 @@ class DET2GraphSurgeon:
         inputs = [{"image": image, "height": raw_height, "width": raw_width}]
         images = [x["image"].to(model.device) for x in inputs]
         images = [(x - model.pixel_mean) / model.pixel_std for x in images]
-        imagelist_images = ImageList.from_tensors(images, 1344)
+        image_height, image_width = images[0].shape[-2:]
+        if image_height > self.height or image_width > self.width:
+            raise ValueError(
+                f"Resized sample image {image_height}x{image_width} exceeds the exported input "
+                f"{self.height}x{self.width}. Set INPUT.MIN_SIZE_TEST and INPUT.MAX_SIZE_TEST "
+                "in the Detectron2 config to fit the exported resolution."
+            )
+        # Pad after normalization, exactly as the exported model does. Anchor positions
+        # depend on this feature-map geometry, not on the contents of the sample image.
+        images = [
+            torch.nn.functional.pad(
+                images[0], (0, self.width - image_width, 0, self.height - image_height)
+            )
+        ]
+        imagelist_images = ImageList.from_tensors(images)
 
         # Get feature maps from backbone.
         features = predictor.model.backbone(imagelist_images.tensor)
@@ -245,6 +259,13 @@ class DET2GraphSurgeon:
         self.batch_size = batch_size
         self.height = self.graph.inputs[0].shape[1]
         self.width = self.graph.inputs[0].shape[2]
+        if not all(
+            isinstance(size, int) and size > 0 and size % 32 == 0
+            for size in (self.height, self.width)
+        ):
+            raise ValueError(
+                "Exported input height and width must be positive fixed multiples of 32."
+            )
 
         input_shape = [self.batch_size, 3, self.height, self.width]
         self.graph.inputs[0].shape = input_shape

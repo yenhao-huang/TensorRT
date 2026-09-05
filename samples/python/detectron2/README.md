@@ -35,20 +35,9 @@ Note: this sample cannot be run on Jetson platforms as `torch.distributed` is no
 The workflow to convert Detectron 2 Mask R-CNN R50-FPN 3x model is basically Detectron 2 → ONNX → TensorRT, and so parts of this process require Detectron 2 to be installed. Official export to ONNX is documented [here](https://detectron2.readthedocs.io/en/latest/tutorials/deployment.html).
 
 ### Detectron 2 Deployment
-Deployment is done through export model script located in `detectron2/tools/deploy/export_model.py` of Detectron 2 [github](https://github.com/facebookresearch/detectron2). Detectron 2 Mask R-CNN R50-FPN 3x model is dynamic with minimum testing dimension size of 800 and maximum of 1333. TensorRT plug-ins used for conversion of this model do not support dynamic shapes, as a result we have to set both height and width of the input tensor to 1344. 1344 instead of 1333 because model requires both height and width of the input tensor to be divisible by 32. In order to export this model with correct 1344x1344 resolution, we have to make a change to `export_model.py`. Currently lines 160-162:
+Deployment uses `detectron2/tools/deploy/export_model.py` from Detectron2. The workflow below builds a fixed square-resolution engine: the side length must be a positive multiple of 32 for the R50-FPN backbone. The default example uses 1344×1344, which accommodates the model's original test resize settings (short edge 800, long edge at most 1333). Smaller resolutions such as 768×768 are also possible; see [Lower fixed input resolutions](#lower-fixed-input-resolutions).
 
-```
-aug = T.ResizeShortestEdge(
-    [cfg.INPUT.MIN_SIZE_TEST, cfg.INPUT.MIN_SIZE_TEST], cfg.INPUT.MAX_SIZE_TEST
-)
-```
-have to be changed to:
-
-```
-aug = T.ResizeShortestEdge(
-    [1344, 1344], 1344
-)
-```
+The export script reads `INPUT.MIN_SIZE_TEST` and `INPUT.MAX_SIZE_TEST` from the config. Set these with command-line overrides as shown below; no changes to the Detectron2 export script are needed.
 
 Export script takes `--sample-image` as one of the arguments. Such image is used to adjust input dimensions and dimensions of tensors for the rest of the network. This sample image has to be an image of 1344x1344 dimensions, which contains at least one detectable by model object. My recommendation is to upsample one of COCO dataset images to 1344x1344. Sample command:
 
@@ -60,18 +49,55 @@ python detectron2/tools/deploy/export_model.py \
     --format onnx \
     --output ./ \
     MODEL.WEIGHTS path/to/model_final_f10217.pkl \
-    MODEL.DEVICE cuda
+    MODEL.DEVICE cuda \
+    INPUT.MIN_SIZE_TEST 1344 INPUT.MAX_SIZE_TEST 1344
 
 ```
 
 Where `--sample-image` is 1344x1344 image; `--config-file` path to Mask R-CNN R50-FPN 3x config, included with detectron2; `MODEL.WEIGHTS` are weights of Mask R-CNN R50-FPN 3x that can be downloaded [here](https://github.com/facebookresearch/detectron2/blob/main/MODEL_ZOO.md). Resulted `model.onnx` will be an input to conversion script.
+
+### Lower fixed input resolutions
+
+To build a 768×768 engine, create a Detectron2 config `model-768.yaml` that inherits the R50-FPN configuration. Replace the base path with your Detectron2 checkout path:
+
+```yaml
+_BASE_: "/path/to/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
+INPUT:
+  MIN_SIZE_TEST: 768
+  MAX_SIZE_TEST: 768
+```
+
+Prepare a square 768×768 sample image containing a detectable object, then export and convert using this same config:
+
+```bash
+python detectron2/tools/deploy/export_model.py \
+    --sample-image sample-768.jpg \
+    --config-file model-768.yaml \
+    --export-method tracing --format onnx --output export-768 \
+    MODEL.WEIGHTS /path/to/model_final_f10217.pkl MODEL.DEVICE cuda
+
+python create_onnx.py \
+    --exported_onnx export-768/model.onnx \
+    --onnx converted-768.onnx \
+    --det2_config model-768.yaml \
+    --det2_weights /path/to/model_final_f10217.pkl \
+    --sample_image sample-768.jpg
+
+python build_engine.py --onnx converted-768.onnx --engine model-768.trt
+python infer.py --engine model-768.trt --input /path/to/images \
+    --det2_config model-768.yaml --output output-768
+```
+
+The converter reads the exported height and width and pads the anchor-generation input to exactly those dimensions. Inference preserves the image aspect ratio using the config's resize limits and pads to the engine input size. Always pass the same config to conversion, inference, and calibration. If the resized image exceeds the fixed input, conversion or inference raises an error instead of generating mismatched anchors or cropping the image.
+
+Re-export the ONNX graph and rebuild the engine for each resolution; changing an existing engine's input dimensions is insufficient. The square export image ensures the trace has the intended input shape; inference images may have different aspect ratios. For another fixed square size, replace both resize limits and the export sample dimensions with that size. Lower resolution can reduce small-object accuracy, so validate boxes, masks, and application accuracy on representative data. Batch-size support and the R50-FPN model restriction are unchanged.
 
 ### Create ONNX Graph
 This is supported Detectron 2 model:
 
 | **Model**                                     | **Resolution** |
 | ----------------------------------------------|----------------|
-| Mask R-CNN R50-FPN 3x                         | 1344x1344      |
+| Mask R-CNN R50-FPN 3x                         | Fixed dimensions divisible by 32 (e.g. 1344×1344 or 768×768) |
 
 If Detectron 2 Mask R-CNN is ready to be converted (i.e. you ran `detectron2/tools/deploy/export_model.py`), run:
 

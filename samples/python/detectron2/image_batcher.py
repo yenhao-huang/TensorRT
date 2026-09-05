@@ -179,6 +179,12 @@ class ImageBatcher:
                 neww = neww * pre_scale
             neww = int(neww + 0.5)
             newh = int(newh + 0.5)
+            if newh > self.height or neww > self.width:
+                raise ValueError(
+                    f"Resized image {newh}x{neww} exceeds the engine input "
+                    f"{self.height}x{self.width}. Set INPUT.MIN_SIZE_TEST and INPUT.MAX_SIZE_TEST "
+                    "in the Detectron2 config to fit the engine resolution."
+                )
 
             # Scaling factor for normalized box coordinates scaling in post-processing.
             scaling = max(newh / height, neww / width)

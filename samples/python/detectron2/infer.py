@@ -120,7 +120,10 @@ class TensorRTInfer:
             self.inputs[0]["allocation"], np.ascontiguousarray(batch)
         )
 
-        self.context.execute_v2(self.allocations)
+        if not self.context.execute_v2(
+            [memory.device_ptr for memory in self.device_memories]
+        ):
+            raise RuntimeError("TensorRT inference failed")
         for o in range(len(outputs)):
             common.memcpy_device_to_host(outputs[o], self.outputs[o]["allocation"])
 
