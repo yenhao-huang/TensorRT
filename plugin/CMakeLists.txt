@@ -55,6 +55,7 @@ set(TRT_PLUGIN_NAMES
     regionPlugin
     reorgPlugin
     resizeNearestPlugin
+    resizeWithPadPlugin
     roiAlignPlugin
     scatterElementsPlugin
     scatterPlugin
