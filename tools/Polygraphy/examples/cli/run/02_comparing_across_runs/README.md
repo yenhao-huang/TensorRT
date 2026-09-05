@@ -68,5 +68,8 @@ and ONNX modles (if they have matching outputs).
 
 For details on how to access and work with the saved outputs
 using the Python API, refer to [API example 08](../../../api/08_working_with_run_results_and_saved_inputs_manually/).
+Its [NumPy decoding notes](../../../api/08_working_with_run_results_and_saved_inputs_manually/#reading-numpy-arrays-from-json)
+also explain why manually decoding the JSON payload as raw tensor bytes can
+produce extra elements and incorrect values.
 
 For information on comparing against custom outputs, refer to [`run` example 06](../06_comparing_with_custom_output_data/).
