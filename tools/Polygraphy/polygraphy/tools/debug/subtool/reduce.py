@@ -403,6 +403,8 @@ class Reduce(Tool):
             return graph
 
         def mark_io(graph, attr, tensors, filter_const=True):
+            # Empty tensors represent omitted optional node inputs/outputs, not graph I/O.
+            tensors = [t for t in tensors if not t.is_empty()]
             if filter_const:
                 tensors = [t for t in tensors if not isinstance(t, gs.Constant)]
 
@@ -451,7 +453,7 @@ class Reduce(Tool):
             return graph
 
         def names_from_tensors(tensors):
-            return [t.name for t in tensors]
+            return [t.name for t in tensors if not t.is_empty()]
 
         def lookup_tensors(graph, names):
             tensor_map = graph.tensors()
