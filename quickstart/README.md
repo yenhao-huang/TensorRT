@@ -12,3 +12,5 @@ Tutorials corresponding to TensorRT QuickStartGuide
 - Semantic Segmentation using TensorRT - [C++ sample and Python notebook](./SemanticSegmentation/)
 - Optimize with TensorRT, Deploy with Triton - [Walkthrough and Python code](./deploy_to_triton/)
 - Quantization with TensorRT Model Optimizer - [Stable Diffusion XL (Base/Turbo) and Stable Diffusion 1.5 Quantization with Model Optimizer](https://github.com/NVIDIA/TensorRT-Model-Optimizer/tree/main/diffusers/quantization)
+
+- Exporting related dynamic dimensions - [Decoder frontend example](./dynamic_shapes/)

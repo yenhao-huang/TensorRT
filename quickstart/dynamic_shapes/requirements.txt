@@ -1,0 +1,4 @@
+numpy
+onnx
+torch>=2.6
+cuda-python>=12.9
